@@ -1,0 +1,158 @@
+### Voucher Engine API Requests
+
+## Base URL
+@baseUrl = http://localhost:8181
+
+## Debit Voucher Endpoints
+
+### Create a new debit voucher
+POST {{baseUrl}}/api/debit-vouchers
+Content-Type: application/json
+
+{
+  "voucherNumber": "DV-2023-002",
+  "voucherDate": "2023-05-15",
+  "amount": 1000.00,
+  "description": "Car supplies purchase",
+  "createdBy": "john.doe",
+  "createdDate": "2023-05-15",
+  "status": "DRAFT",
+  "debitAccount": "EXPENSE-1001",
+  "creditAccount": "CASH-2001"
+}
+
+### Get debit voucher by ID
+GET {{baseUrl}}/api/debit-vouchers/2
+
+### Get debit voucher by voucher number
+GET {{baseUrl}}/api/debit-vouchers/number/DV-2023-001
+
+### Get all debit vouchers
+GET {{baseUrl}}/api/debit-vouchers
+
+### Get debit vouchers by status
+GET {{baseUrl}}/api/debit-vouchers/status/PENDING_APPROVAL
+
+### Get debit vouchers by date range
+GET {{baseUrl}}/api/debit-vouchers/date-range?startDate=2023-01-01&endDate=2023-12-31
+
+### Update a debit voucher
+PUT {{baseUrl}}/api/debit-vouchers/1
+Content-Type: application/json
+
+{
+  "voucherNumber": "DV-2023-001",
+  "voucherDate": "2023-05-15",
+  "amount": 1200.00,
+  "description": "Office supplies purchase - updated",
+  "createdBy": "john.doe",
+  "createdDate": "2023-05-15",
+  "status": "PENDING_APPROVAL",
+  "debitAccount": "EXPENSE-1001",
+  "creditAccount": "CASH-2001"
+}
+
+### Approve a debit voucher
+PUT {{baseUrl}}/api/debit-vouchers/1/approve?approvedBy=jane.smith
+
+### Reject a debit voucher
+PUT {{baseUrl}}/api/debit-vouchers/1/reject?rejectedBy=jane.smith
+
+### Delete a debit voucher
+DELETE {{baseUrl}}/api/debit-vouchers/1
+
+## Credit Voucher Endpoints
+
+### Create a new credit voucher
+POST {{baseUrl}}/api/credit-vouchers
+Content-Type: application/json
+
+{
+  "voucherNumber": "CV-2023-003",
+  "voucherDate": "2023-05-15",
+  "amount": 500.00,
+  "description": "Customer payment received",
+  "createdBy": "john.doe",
+  "createdDate": "2023-05-15",
+  "status": "DRAFT",
+  "creditAccount": "REVENUE-3001",
+  "debitAccount": "CASH-2001"
+}
+
+### Get credit voucher by ID
+GET {{baseUrl}}/api/credit-vouchers/1
+
+### Get credit voucher by voucher number
+GET {{baseUrl}}/api/credit-vouchers/number/CV-2023-001
+
+### Get all credit vouchers
+GET {{baseUrl}}/api/credit-vouchers
+
+### Get credit vouchers by status
+GET {{baseUrl}}/api/credit-vouchers/status/PENDING_APPROVAL
+
+### Get credit vouchers by date range
+GET {{baseUrl}}/api/credit-vouchers/date-range?startDate=2023-01-01&endDate=2023-12-31
+
+### Update a credit voucher
+PUT {{baseUrl}}/api/credit-vouchers/1
+Content-Type: application/json
+
+{
+  "voucherNumber": "CV-2023-001",
+  "voucherDate": "2023-05-15",
+  "amount": 550.00,
+  "description": "Customer payment received - updated",
+  "createdBy": "john.doe",
+  "createdDate": "2023-05-15",
+  "status": "PENDING_APPROVAL",
+  "creditAccount": "REVENUE-3001",
+  "debitAccount": "CASH-2001"
+}
+
+### Approve a credit voucher
+PUT {{baseUrl}}/api/credit-vouchers/1/approve?approvedBy=jane.smith
+
+### Reject a credit voucher
+PUT {{baseUrl}}/api/credit-vouchers/1/reject?rejectedBy=jane.smith
+
+### Delete a credit voucher
+DELETE {{baseUrl}}/api/credit-vouchers/1 
+
+## RabbitMQ Endpoints
+
+### Send a message to RabbitMQ
+POST {{baseUrl}}/api/rabbitmq/send
+Content-Type: application/json
+
+"This is a test message for RabbitMQ"
+
+### Send a voucher notification to RabbitMQ
+POST {{baseUrl}}/api/rabbitmq/send
+Content-Type: application/json
+
+{
+  "voucherNumber": "DV-2023-001",
+  "action": "APPROVED",
+  "timestamp": "2023-05-15T14:30:00",
+  "user": "jane.smith",
+  "message": "Arefin Voucher has been approved"
+}
+
+## RabbitMQ Debit Voucher Endpoints
+
+### Send a debit voucher to RabbitMQ (will be stored in database by consumer)
+POST {{baseUrl}}/api/rabbitmq/debit-vouchers/send
+Content-Type: application/json
+
+{
+  "voucherNumber": "DV-2023-006",
+  "voucherDate": "2023-05-20",
+  "amount": 750.00,
+  "description": "Rent equipment purchase via Kafka",
+  "createdBy": "john.doe",
+  "createdDate": "2023-05-20",
+  "status": "DRAFT",
+  "debitAccount": "EXPENSE-1002",
+  "creditAccount": "CASH-2001"
+} 
