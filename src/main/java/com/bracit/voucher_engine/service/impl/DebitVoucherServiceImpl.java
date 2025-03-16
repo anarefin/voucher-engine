@@ -7,18 +7,26 @@ import com.bracit.voucher_engine.model.VoucherStatus;
 import com.bracit.voucher_engine.repository.DebitVoucherRepository;
 import com.bracit.voucher_engine.service.DebitVoucherService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
 @Service
 public class DebitVoucherServiceImpl implements DebitVoucherService {
 
     private final DebitVoucherRepository debitVoucherRepository;
+    
+    @Autowired
+    @Qualifier("virtualThreadExecutor")
+    private ExecutorService virtualThreadExecutor;
 
     @Autowired
     public DebitVoucherServiceImpl(DebitVoucherRepository debitVoucherRepository) {
@@ -41,27 +49,58 @@ public class DebitVoucherServiceImpl implements DebitVoucherService {
             return new ArrayList<>();
         }
         
-        // Map all DTOs to entities
-        List<DebitVoucher> vouchers = voucherDtos.stream()
-                .map(this::mapToEntity)
-                .peek(voucher -> {
-                    // Set default values if not already set
-                    if (voucher.getStatus() == null) {
-                        voucher.setStatus(VoucherStatus.DRAFT);
-                    }
-                    if (voucher.getCreatedDate() == null) {
-                        voucher.setCreatedDate(LocalDate.now());
-                    }
-                })
-                .collect(Collectors.toList());
+        // Process in parallel using virtual threads for better performance
+        int batchSize = 100; // Adjust based on your database capabilities
+        List<CompletableFuture<List<DebitVoucherDto>>> futures = new ArrayList<>();
         
-        // Save all entities in a single batch operation
-        List<DebitVoucher> savedVouchers = debitVoucherRepository.saveAll(vouchers);
+        // Split into smaller batches for parallel processing
+        for (int i = 0; i < voucherDtos.size(); i += batchSize) {
+            int endIndex = Math.min(i + batchSize, voucherDtos.size());
+            List<DebitVoucherDto> batch = voucherDtos.subList(i, endIndex);
+            
+            // Process each batch in a virtual thread
+            CompletableFuture<List<DebitVoucherDto>> future = CompletableFuture.supplyAsync(() -> {
+                // Map all DTOs to entities
+                List<DebitVoucher> vouchers = batch.stream()
+                        .map(this::mapToEntity)
+                        .peek(voucher -> {
+                            // Set default values if not already set
+                            if (voucher.getStatus() == null) {
+                                voucher.setStatus(VoucherStatus.DRAFT);
+                            }
+                            if (voucher.getCreatedDate() == null) {
+                                voucher.setCreatedDate(LocalDate.now());
+                            }
+                        })
+                        .collect(Collectors.toList());
+                
+                // Save all entities in a single batch operation
+                List<DebitVoucher> savedVouchers = debitVoucherRepository.saveAll(vouchers);
+                
+                // Map saved entities back to DTOs
+                return savedVouchers.stream()
+                        .map(this::mapToDto)
+                        .collect(Collectors.toList());
+            }, virtualThreadExecutor);
+            
+            futures.add(future);
+        }
         
-        // Map saved entities back to DTOs
-        return savedVouchers.stream()
-                .map(this::mapToDto)
+        // Combine all results
+        return futures.stream()
+                .map(CompletableFuture::join)
+                .flatMap(List::stream)
                 .collect(Collectors.toList());
+    }
+
+    @Override
+    @Async("asyncTaskExecutor")
+    public CompletableFuture<DebitVoucherDto> getVoucherByIdAsync(Long id) {
+        return CompletableFuture.supplyAsync(() -> {
+            DebitVoucher voucher = debitVoucherRepository.findById(id)
+                    .orElseThrow(() -> new ResourceNotFoundException("Debit Voucher not found with id: " + id));
+            return mapToDto(voucher);
+        }, virtualThreadExecutor);
     }
 
     @Override

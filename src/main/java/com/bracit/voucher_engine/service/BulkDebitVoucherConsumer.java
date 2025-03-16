@@ -5,21 +5,20 @@ import com.bracit.voucher_engine.dto.DebitVoucherDto;
 import com.bracit.voucher_engine.dto.DebitVoucherMessage;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 /**
  * Service for consuming and processing bulk debit vouchers from RabbitMQ
+ * Uses virtual threads for improved performance and scalability
  */
 @Service
 public class BulkDebitVoucherConsumer {
@@ -27,8 +26,9 @@ public class BulkDebitVoucherConsumer {
     @Autowired
     private DebitVoucherService debitVoucherService;
     
-    @Value("${app.bulk-consumption.thread-count:4}")
-    private int threadCount;
+    @Autowired
+    @Qualifier("virtualThreadExecutor")
+    private ExecutorService virtualThreadExecutor;
     
     @Value("${app.bulk-consumption.batch-size:100}")
     private int batchSize;
@@ -41,43 +41,13 @@ public class BulkDebitVoucherConsumer {
     private final AtomicLong failureCount = new AtomicLong(0);
     private final ConcurrentHashMap<String, String> failedVouchers = new ConcurrentHashMap<>();
     
-    private ExecutorService executorService;
-    
-    /**
-     * Initialize the executor service for parallel processing
-     */
-    public void init() {
-        if (executorService == null || executorService.isShutdown()) {
-            executorService = Executors.newFixedThreadPool(threadCount);
-            System.out.println("Bulk debit voucher consumer initialized with " + threadCount + " threads");
-        }
-    }
-    
-    /**
-     * Shutdown the executor service
-     */
-    public void shutdown() {
-        if (executorService != null && !executorService.isShutdown()) {
-            executorService.shutdown();
-            try {
-                if (!executorService.awaitTermination(60, TimeUnit.SECONDS)) {
-                    executorService.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                executorService.shutdownNow();
-                Thread.currentThread().interrupt();
-            }
-            System.out.println("Bulk debit voucher consumer shutdown completed");
-        }
-    }
-    
     /**
      * Consumes batches of debit voucher messages from RabbitMQ
      * @param messages The batch of debit voucher messages received from RabbitMQ
      */
     @RabbitListener(queues = RabbitMQConfig.DEBIT_VOUCHER_QUEUE, 
                    containerFactory = "batchListenerContainerFactory",
-                   concurrency = "${app.bulk-consumption.listener-concurrency:2}")
+                   concurrency = "${app.bulk-consumption.listener-concurrency:4}")
     public void receiveBatchDebitVouchers(List<DebitVoucherMessage> messages) {
         if (messages == null || messages.isEmpty()) {
             return;
@@ -90,33 +60,46 @@ public class BulkDebitVoucherConsumer {
     }
     
     /**
-     * Process a batch of debit voucher messages
+     * Process a batch of debit voucher messages using virtual threads
      * @param messages List of debit voucher messages to process
      */
     public void processBatch(List<DebitVoucherMessage> messages) {
-        // Initialize executor service if not already done
-        init();
-        
         System.out.println("Processing batch of " + messages.size() + " debit vouchers");
         
-        // Convert all messages to DTOs in a single step
-        List<DebitVoucherDto> voucherDtos = messages.stream()
+        // Reset counters for this batch
+        processedCount.set(0);
+        successCount.set(0);
+        failureCount.set(0);
+        failedVouchers.clear();
+        
+        // Convert messages to DTOs
+        List<DebitVoucherDto> dtos = messages.stream()
                 .map(this::convertMessageToDto)
                 .collect(Collectors.toList());
         
-        // Process in sub-batches to avoid overwhelming the database
-        for (int i = 0; i < voucherDtos.size(); i += batchSize) {
-            int endIndex = Math.min(i + batchSize, voucherDtos.size());
-            List<DebitVoucherDto> batchDtos = voucherDtos.subList(i, endIndex);
-            
-            executorService.submit(() -> processBatchInBulk(batchDtos));
+        // Process in smaller batches for better throughput
+        List<List<DebitVoucherDto>> batches = new ArrayList<>();
+        for (int i = 0; i < dtos.size(); i += batchSize) {
+            batches.add(dtos.subList(i, Math.min(i + batchSize, dtos.size())));
         }
         
-        // Update processed count and report progress
-        long currentCount = processedCount.addAndGet(messages.size());
-        if (currentCount % reportInterval == 0 || messages.size() >= reportInterval) {
-            reportProgress();
-        }
+        // Process each batch with virtual threads
+        batches.forEach(batch -> {
+            virtualThreadExecutor.submit(() -> {
+                try {
+                    processBatchInBulk(batch);
+                } catch (Exception e) {
+                    System.err.println("Error processing batch: " + e.getMessage());
+                    // Fall back to individual processing
+                    processIndividually(batch, e);
+                }
+                
+                // Report progress periodically
+                if (processedCount.incrementAndGet() % reportInterval == 0) {
+                    reportProgress();
+                }
+            });
+        });
     }
     
     /**

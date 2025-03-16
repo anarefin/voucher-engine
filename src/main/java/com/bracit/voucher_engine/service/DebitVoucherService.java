@@ -5,11 +5,13 @@ import com.bracit.voucher_engine.model.VoucherStatus;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 public interface DebitVoucherService {
     DebitVoucherDto createVoucher(DebitVoucherDto voucherDto);
     List<DebitVoucherDto> createVouchersBulk(List<DebitVoucherDto> voucherDtos);
     DebitVoucherDto getVoucherById(Long id);
+    CompletableFuture<DebitVoucherDto> getVoucherByIdAsync(Long id);
     DebitVoucherDto getVoucherByNumber(String voucherNumber);
     List<DebitVoucherDto> getAllVouchers();
     List<DebitVoucherDto> getVouchersByStatus(VoucherStatus status);
